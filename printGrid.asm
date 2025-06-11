@@ -1,31 +1,21 @@
-
-
+ 
+; https://gist.github.com/ConnerWill/d4b6c776b509add763e17f9f113fd25bu
 
 section .data
-    msg     db      'Hello, world!', 10,10,10    ; string with newline
-    len     equ     $ - msg             ; length of the string
-	
-	item0 db 0AAh
-	item1 db 0ABh
-	item2 db 0BBh
-	item3 db 0BCh
-	item4 db 0CCh
-	item5 db 0CDh
-	item6 db 0DDh
-	item7 db 0DEh
-	item8 db 0EEh
-	item9 db 0EEh
-	item10 db 011h
-	item11 db 022h
-	item12 db 033h
-	item13 db 044h
-	item14 db 055h
-	item15 db 066h
-	lenItem equ $ - item8
+  beginingOfTable db 0x1b, '[12A', 0x1b, '[2D', 0
+  beginingOfTableLen equ $ - beginingOfTable
+
+	items db 0AAh, 0ABh, 0BBh, 0BCh, 0CCh, 0CDh, 0DDh, 0DEh, 0EEh, 0EEh, 011h, 022h, 033h, 044h, 055h, 066h
+	lenItems equ $ - items
 	diff db 3 ; location in the line
 	itemDiff db 0
 	template db '        |        |        |        ', 10
 	lenTemplate equ $ - template
+  x db 'x'
+
+timespec:
+	dq 0
+	dq 10000000
 
 section .bss
 	buffer resb lenTemplate    ; make a writable copy
@@ -129,16 +119,10 @@ write_template:
     pop     rax
 	ret
 	
-	
-	
-_start:
-	call copy_template_to_buffer	
-    ; write(int fd, const void *buf, size_t count)
-    mov     rax, 1          ; syscall number for sys_write
-    mov     rdi, 1          ; file descriptor 1 = stdout
-    mov     rsi, msg        ; pointer to string
-    mov     rdx, len        ; length of string
-    syscall                 ; make syscall
+print_table:
+    mov byte [itemDiff], 0
+    ; mov byte [diff], 3
+    call copy_template_to_buffer	
 	
 	mov rcx, 4
 loopGrid:
@@ -153,7 +137,7 @@ loopGrid:
 	mov rcx, 4
 setItems:
 	movzx rdx, byte[itemDiff]
-    mov al, [item0 + rdx]
+    mov al, [items + rdx]
     lea rsi, [buffer + rbx]
 	add rbx, 9
 	inc byte [itemDiff]
@@ -173,9 +157,45 @@ setItems:
 	call write_template
     pop rcx
 	loop loopGrid
+  ret
+
+
+
 
 	
-	
+_start:
+  
+  mov r8, 1000
+loopBig:
+	call print_table
+	; sleep for 1 second
+	mov rax, 35 ; syscall number for nanosleep
+	lea rdi, [rel timespec]
+  xor rsi, rsi ; Null pointer to rem
+  syscall
+  ; increment the value of all the items AA -> ABh
+  xor rcx, rcx
+  mov cl, lenItems
+loopUpdate:
+    dec cl
+    inc byte [items + rcx]
+    inc cl
+    loop loopUpdate
+
+    cmp r8, 1
+    je endLoop
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, beginingOfTable
+    mov rdx, beginingOfTableLen
+    syscall
+
+endLoop:
+    dec r8
+    cmp r8, 0
+    jnz loopBig
+
+
     ; exit(int status)
     mov     rax, 60         ; syscall number for sys_exit
     xor     rdi, rdi        ; exit status 0
