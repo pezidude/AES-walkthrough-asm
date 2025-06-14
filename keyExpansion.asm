@@ -1,8 +1,11 @@
+section .bss
+    originalKey resd 4 ; reserve 4 dwords (16 bytes)
+	dwords resd 45 ; 44 double word and the t (varient that needed every 4 dwords (t4, t8, t12, ... ,t40))
 section .data
 	
-	originalKey dd 2475A2B3h, 34755688h, 31E21200h, 13AA5487h
-	originalKeyLength equ $ - originalKey
-	dwords dd 45 dup (0) ; 44 double word and the t (varient that needed every 4 dwords (t4, t8, t12, ... ,t40))
+	;originalKey dd 2475A2B3h, 34755688h, 31E21200h, 13AA5487h
+	originalKeyLength equ 16
+	;dwords dd 45 dup (0) 
 	dwordCounter db 0
 	bindWordStr db 17 dup(0)         ; 16 bits + newline character
 	roundKeys dq 10 dup (0) ; 10 round Keys
@@ -31,6 +34,36 @@ section .data
 	
 section .text
     global _start
+	extern ConvertHexToEAX
+	
+; ----------------------------------------------------------------
+; procedure that calls to function from formatConverter.asm
+; the procedure handle a key in string format an input 
+; and puts it in section .bss originalKey resd 4
+; rsi = pointer to 32-char hex key string
+; fills originalKey with 4 dwords
+; ----------------------------------------------------------------
+parse_key:
+    xor rcx, rcx              ; index = 0
+
+.loop:
+    cmp rcx, 4
+    je .done                  ; stop after 4 DWORDs
+
+    mov rax, rsi              ; pointer to input string
+    mov rdx, rcx
+    shl rdx, 3                ; offset = rcx * 8 (8 hex chars per DWORD)
+    add rax, rdx              ; point to next 8-hex-char block
+    call ConvertHexToEAX          ; convert 8 hex chars at RAX to DWORD in RAX
+
+    mov rbx, originalKey
+    mov [rbx + rcx*4], eax    ; store DWORD at originalKey[rcx]
+
+    inc rcx
+    jmp .loop
+
+.done:
+    ret
 	
 
 ; ----------------------------------------------------------------
@@ -142,6 +175,7 @@ preRoundTransformation:
 
 	xor rax, rax
 InitWords:
+	xor rbx, rbx
 	mov bl, [dwordCounter]
 	mov eax, dword [originalKey + rbx*4]
 	mov [dwords + rbx*4], eax
@@ -238,6 +272,13 @@ SubWord:
 	
 	
 _start:
+	mov rdi, [rsp]          ; argc
+    cmp rdi, 2
+    jl _exit                ; if less than 2 args, exit
+    mov rsi, [rsp + 16]     ; argv[1] - pointer to input string (key)
+    call parse_key          ; call function to process the key
+	
+	
 	call preRoundTransformation	
 	xor rcx, rcx 
 	mov cl, 4
@@ -257,7 +298,7 @@ printWords:
 	
 	
 
-	
+_exit:
 	; exit(int status)
     mov     rax, 60         ; syscall number for sys_exit
     xor     rdi, rdi        ; exit status 0
