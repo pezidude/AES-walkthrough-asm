@@ -2,39 +2,48 @@ section .bss
     originalKey resd 4 ; reserve 4 dwords (16 bytes)
 	dwords resd 45 ; 44 double word and the t (varient that needed every 4 dwords (t4, t8, t12, ... ,t40))
 section .data
+	numbersStr:
+    db "00","01","02","03","04","05","06","07","08","09","10","11","12","13","14","15"
+    db "16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31"
+    db "32","33","34","35","36","37","38","39","40","41","42","43"
 	
-	;originalKey dd 2475A2B3h, 34755688h, 31E21200h, 13AA5487h
+	tStr:
+    db "t04","t08","t12","t16","t20","t24","t28","t32","t36","t40"
+	tStrLength equ 3
+	
+	numberStrLength equ 2
+	msgword db 'word'
+	msgwordLength equ $ - msgword
+	colonSymbol db ':'
+	
 	originalKeyLength equ 16
-	;dwords dd 45 dup (0) 
 	dwordCounter db 0
 	bindWordStr db 17 dup(0)         ; 16 bits + newline character
 	roundKeys dq 10 dup (0) ; 10 round Keys
+	tCounter db 4 ; the first t is t4
 	Rcon:
-    dd 0x01000000
-    dd 0x02000000
-    dd 0x04000000
-    dd 0x08000000
-    dd 0x10000000
-    dd 0x20000000
-    dd 0x40000000
-    dd 0x80000000
-    dd 0x1B000000
-    dd 0x36000000
+    dd 0x01000000, 0x02000000, 0x04000000, 0x08000000,0x10000000
+    dd 0x20000000, 0x40000000, 0x80000000, 0x1B000000, 0x36000000
 	
 	roundCounter db 0
 	
 	timespec:
-	dq 1 ; sec
-	dq 0 ; nano sec
+	dq 0 ; sec
+	dq 250000000 ; nano sec
 	
 	goUpOneLine db 0x1b, '[1F' ; go the the beggining of the previous line
 	goUpOneLineLength equ $ - goUpOneLine
-	
+	goRightXcolumns db 0x1b, '[11C'
+	goRightXcolumnsLength equ $ - goRightXcolumns
+	go4ColumnsRight db 0x1b, '[4C'
+	go4ColumnsRightLenght equ $ - go4ColumnsRight
 	
 	
 section .text
     global _start
-	extern ConvertHexToEAX
+	extern ConvertHexToEAX ; from formatConverter.asm
+	extern substitute_al_via_sbox ; from AES_sbox_substitute.asm
+
 	
 ; ----------------------------------------------------------------
 ; procedure that calls to function from formatConverter.asm
@@ -65,7 +74,56 @@ parse_key:
 .done:
     ret
 	
-
+	
+; ----------------------------------------------------------------
+; procedure that rotate a dword a byte left
+; input rdi = index into dwords array (rdi =0 - word0 , rdi = 1 - word1)
+; ----------------------------------------------------------------
+printOpeningToWord:
+	push rax
+    push rcx
+    push rbx
+    push rsi
+    push rdi
+	
+	;print 'word'
+	mov     rax, 1          ; syscall number for write
+    mov     rdi, 1          ; file descriptor 1 = stdout
+    mov     rsi, msgword
+    mov     rdx, msgwordLength
+	syscall
+	
+	xor rcx, rcx
+	mov cl, [dwordCounter]
+	;print the number of the word number based on [dwordCounter]
+	mov     rax, 1          ; syscall number for write
+    mov     rdi, 1          ; file descriptor 1 = stdout
+    lea     rsi, [numbersStr + rcx*2]
+    mov     rdx, numberStrLength ; numberStrLength = 2 (only one number)
+	syscall
+	
+	;print ':'
+	mov     rax, 1          ; syscall number for write
+    mov     rdi, 1          ; file descriptor 1 = stdout
+    mov     rsi, colonSymbol
+    mov     rdx, 1
+	syscall
+	
+	;go 4 columns right
+	mov     rax, 1          ; syscall number for write
+    mov     rdi, 1          ; file descriptor 1 = stdout
+    mov     rsi, go4ColumnsRight
+    mov     rdx, go4ColumnsRightLenght
+	syscall
+	
+	pop rdi
+    pop rsi
+    pop rbx
+    pop rcx
+    pop rax
+    ret
+	
+	
 ; ----------------------------------------------------------------
 ; void BinaryPrintIndexed(rdi = index into dwords array)
 ; Prints binary representation of dwords[rdi] with newline
@@ -162,6 +220,34 @@ moveCursorUpOneLine:
 	
 	
 ;----------------------------------------------------
+; moveCursorToRight
+; Moves the terminal cursor X columns  to the right 
+; (based on  section .data goRightXcolumns)
+; using ANSI escape code via syscall write
+;----------------------------------------------------
+moveCursorToRight:
+    push rax
+    push rdi
+    push rsi
+    push rdx
+	push rcx 
+	push rbx
+
+    mov     rax, 1          ; syscall number for write
+    mov     rdi, 1          ; file descriptor 1 = stdout
+    mov     rsi, goRightXcolumns
+    mov     rdx, goRightXcolumnsLength
+    syscall
+	pop rbx
+	pop rcx 
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rax
+    ret
+	
+	
+;----------------------------------------------------
 ; initialize the first 4 word based on the originalKey
 ;----------------------------------------------------
 preRoundTransformation:
@@ -171,15 +257,12 @@ preRoundTransformation:
 	
 	xor rcx, rcx
 	mov cl, 4
-	xor rbx, rbx
-
 	xor rax, rax
-InitWords:
 	xor rbx, rbx
-	mov bl, [dwordCounter]
+InitWords:
 	mov eax, dword [originalKey + rbx*4]
 	mov [dwords + rbx*4], eax
-	inc byte [dwordCounter]
+	inc bl
 	loop InitWords
 	
 	pop rax
@@ -187,12 +270,25 @@ InitWords:
     pop rbx
 	ret
 	
-; proc that rotate a dword a byte left
+;-------------------------------------------------------------------------------
+; procedure that copies the needed word for the T
+; input rdi = index into dwords array (rdi =0 - word0 , rdi = 1 - word1)
+;-------------------------------------------------------------------------------
+CopyWordForT:
+	push rax 
+	mov eax, dword [dwords +  rdi*4]
+	mov rdi, 44
+	mov dword [dwords +  rdi*4], eax	
+	pop rax
+	ret
+	
+	
+; procedure that rotate a dword a byte left
 ; input rdi = index into dwords array (rdi =0 - word0 , rdi = 1 - word1)
 ;================================================
 ;************************VISUAL VERION************************
 ;================================================
-RotWordVisual:
+VisualRotWord:
 	push rsi
 	push rax
 	push rbx
@@ -219,16 +315,16 @@ loopRotateBitLeft:
 	mov rdi, 44 ; the t varient (special)
 	mov dword [dwords +  rdi*4], eax	
 	
+	
+	;move cursor to the right
+	call moveCursorToRight
 	; print the current rotation result
 	mov rdi, 44 ; the t varient (special)
 	call BinaryPrintIndexed ; with the index in rdi
 	
-	cmp cl, 1
-	je endLoop
 	; go the the beggining of the previous line (skipped in the last iteration)
 	call moveCursorUpOneLine
 
-endLoop:
 	;sleep a little bit
 	call nanosleep
 	; countinue loop (if need)
@@ -241,7 +337,7 @@ endLoop:
 	ret
 
 
-; proc that rotate a dword a byte left
+; procedure that rotate a dword a byte left
 ; input rdi = index into dwords array (rdi =0 - word0 , rdi = 1 - word1)
 ;================================================
 ;************************NOT VISUAL VERION************************
@@ -264,12 +360,84 @@ RotWord:
 	pop rax
 	pop rsi
 	ret
+	
+	
+; procedure that substitutes every byte in the dword by the Sbox
+; input rdi = index into dwords array (rdi =0 - word0 , rdi = 1 - word1)
+;================================================
+;************************VISUAL VERION************************
+;================================================	
+VisualSubWord:
+	push rsi
+	push rax
+	push rcx
+	push r8
+	
+	lea rsi, [dwords + rdi*4] ; rsi holds the pointer to the word that i need to sub
+	xor rax,rax
+	xor r8, r8 ; counter 
+	xor rcx, rcx
+	mov cl, 4 ; 4 bytes to sub in a dword
+Visualsubloop:
+	mov al, byte [rsi + r8]
+	call substitute_al_via_sbox ; al is the input (al holds the byte to sub, at the end al will have sbox(al) )
+	mov byte [rsi + r8], al ; save the substituted byte
+	inc r8
+	
+	;move cursor to the right
+	call moveCursorToRight
+	;print the dword with the current change
+	mov rdi, 44 ; the t varient (special)
+	call BinaryPrintIndexed
+	
+	cmp cl, 1
+	je endSubLoop
+	; go the the beggining of the previous line (skipped in the last iteration)
+	call moveCursorUpOneLine
+	
 
+endSubLoop:
+	;sleep a little bit
+	call nanosleep
+	; countinue loop (if need)
+	loop Visualsubloop
+	
+	pop r8
+	pop rcx
+	pop rax
+	pop rsi
+	ret
+	
+	
+; procedure that substitutes every byte in the dword by the Sbox
+; input rdi = index into dwords array (rdi =0 - word0 , rdi = 1 - word1)
+;================================================
+;************************NOT VISUAL VERION************************
+;================================================	
 SubWord:
-	nop
-	; code
+	push rsi
+	push rax
+	push rcx
+	push r8
 	
+	lea rsi, [dwords + rdi*4] ; rsi holds the pointer to the word that i need to sub
+	xor rax,rax
+	xor r8, r8 ; counter 
+	xor rcx, rcx
+	mov cl, 4 ; 4 bytes to sub in a dword
+subloop:
+	mov al, byte [rsi + r8]
+	call substitute_al_via_sbox ; al is the input (al holds the byte to sub, at the end al will have sbox(al) )
+	mov byte [rsi + r8], al ; save the substituted byte
+	inc r8
+	loop subloop
 	
+	pop r8
+	pop rcx
+	pop rax
+	pop rsi
+	ret
+
 	
 _start:
 	mov rdi, [rsp]          ; argc
@@ -284,19 +452,21 @@ _start:
 	mov cl, 4
 	mov rdi, 0
 printWords:
+	call printOpeningToWord
     call BinaryPrintIndexed
+	call nanosleep
+	inc byte [dwordCounter]
 	inc rdi
 	loop printWords
 	
 	;----------test----------
 	mov rdi, 3
-	mov eax, dword [dwords +  rdi*4],
+	call CopyWordForT
+	call printOpeningToWord
 	mov rdi, 44
-	mov dword [dwords +  rdi*4], eax	
-	
-	call RotWordVisual ; testing visual rotate on word3
-	
-	
+	call VisualRotWord
+	call nanosleep ; sleep 
+	call VisualSubWord ; testing SubWord on word3
 
 _exit:
 	; exit(int status)
