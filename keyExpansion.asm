@@ -7,9 +7,8 @@ section .data
     db "16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31"
     db "32","33","34","35","36","37","38","39","40","41","42","43"
 	
-	tStr:
-    db "t04","t08","t12","t16","t20","t24","t28","t32","t36","t40"
-	tStrLength equ 3
+	tStr db "t:         " 
+	tStrLength equ $ - tStr
 	
 	numberStrLength equ 2
 	msgword db 'word'
@@ -18,7 +17,7 @@ section .data
 	
 	originalKeyLength equ 16
 	dwordCounter db 0
-	bindWordStr db 17 dup(0)         ; 16 bits + newline character
+	bindWordStr db 17 dup (0) ; 16 bits + newline character
 	roundKeys dq 10 dup (0) ; 10 round Keys
 	tCounter db 4 ; the first t is t4
 	Rcon:
@@ -122,6 +121,31 @@ printOpeningToWord:
     pop rcx
     pop rax
     ret
+	
+	
+; ----------------------------------------------------------------
+; procedure that prints 't:         '
+; ----------------------------------------------------------------
+printTopening:
+	push rax
+    push rcx
+    push rbx
+    push rsi
+    push rdi
+	
+	;print t:
+	mov     rax, 1          ; syscall number for write
+    mov     rdi, 1          ; file descriptor 1 = stdout
+    mov     rsi, tStr
+    mov     rdx, tStrLength
+	syscall
+	
+	pop rdi
+    pop rsi
+    pop rbx
+    pop rcx
+    pop rax
+	ret 
 	
 	
 ; ----------------------------------------------------------------
@@ -270,18 +294,6 @@ InitWords:
     pop rbx
 	ret
 	
-;-------------------------------------------------------------------------------
-; procedure that copies the needed word for the T
-; input rdi = index into dwords array (rdi =0 - word0 , rdi = 1 - word1)
-;-------------------------------------------------------------------------------
-CopyWordForT:
-	push rax 
-	mov eax, dword [dwords +  rdi*4]
-	mov rdi, 44
-	mov dword [dwords +  rdi*4], eax	
-	pop rax
-	ret
-	
 	
 ; procedure that rotate a dword a byte left
 ; input rdi = index into dwords array (rdi =0 - word0 , rdi = 1 - word1)
@@ -390,13 +402,13 @@ Visualsubloop:
 	mov rdi, 44 ; the t varient (special)
 	call BinaryPrintIndexed
 	
-	cmp cl, 1
-	je endSubLoop
+	;cmp cl, 1============================
+	;je endSubLoop========================
 	; go the the beggining of the previous line (skipped in the last iteration)
 	call moveCursorUpOneLine
 	
 
-endSubLoop:
+;endSubLoop:===========================
 	;sleep a little bit
 	call nanosleep
 	; countinue loop (if need)
@@ -439,6 +451,86 @@ subloop:
 	ret
 
 	
+;------------------------------------------
+; procedure that addresses this condition: 
+; if ( i mod 4) != 0,  Wi = W(i-1) ^ W(i-4)
+;------------------------------------------
+generateNewWordREGULAR:
+	push rax
+	push rbx
+	push rdi
+	
+	xor rax, rax
+	xor rbx, rbx
+	movzx rdi, byte [dwordCounter]
+	dec rdi
+	mov eax, [dwords + rdi*4] ; W(i-1)
+	inc rdi
+	
+	sub rdi, 4
+	mov ebx, [dwords + rdi*4 ] ; W(i-4)
+	add rdi, 4
+	
+	xor eax, ebx ; Wi = W(i-1) ^ W(i-4)
+	mov dword [dwords + rdi*4], eax ; place the new word in the correct index
+	
+	pop rdi
+	pop rbx
+	pop rax
+	ret
+	
+	
+;------------------------------------------
+; procedure that addresses this condition: 
+; if ( i mod 4) == 0,  Wi = t ^ W(i - 4)
+; t = Subword( Rotword(w(i-1)) ) ^ Rcon(i/4)
+;------------------------------------------
+generateNewWordSPECIAL:
+	push rax
+	push rbx
+	push rdi
+	
+	xor rax, rax
+	xor rbx, rbx
+	movzx rdi, byte [dwordCounter]
+	dec rdi
+	mov eax, [dwords + rdi*4] ; W(i-1)
+	inc rdi
+	
+	;set the t value
+	mov rdi, 44
+	mov [dwords + rdi*4], eax ; put W(i-1) in the t value (inital step)
+	
+	call printTopening
+	call VisualRotWord
+	call nanosleep ; sleep
+	call VisualSubWord
+	call nanosleep ; sleep
+	
+	movzx rdi, byte [dwordCounter]
+	mov eax, [Rcon + rdi - 4] ; the current Round constant: rcon(rdi/4)
+	mov rdi, 44
+	xor [dwords + rdi*4], eax ; now [dwords + rdi*4] has the final t value
+	
+	call moveCursorToRight
+	call BinaryPrintIndexed ; print the t value
+	
+	xor rax, rax 
+	mov eax, [dwords + rdi*4] ; final t value
+	movzx rdi, byte [dwordCounter]
+	sub rdi, 4
+	mov ebx, [dwords + rdi*4 ] ; W(i-4)
+	add rdi, 4
+	
+	xor eax, ebx ; Wi = t ^ W(i-4)
+	mov dword [dwords + rdi*4], eax ; place the new word in the correct index
+	
+	pop rdi
+	pop rbx
+	pop rax
+	ret
+	
+	
 _start:
 	mov rdi, [rsp]          ; argc
     cmp rdi, 2
@@ -460,14 +552,29 @@ printWords:
 	loop printWords
 	
 	;----------test----------
-	mov rdi, 3
-	call CopyWordForT
+	xor rcx, rcx 
+	mov cx, 40
+CreateAllWordsLoop:
+	mov al, byte [dwordCounter] ; al is the dwordCounter
+	and al, 0b11 ; al mod 4 result
+	cmp al, 0
+	je specialWord
+	call generateNewWordREGULAR
+	jmp continue
+	
+specialWord:
+	call generateNewWordSPECIAL
+	
+continue:
 	call printOpeningToWord
-	mov rdi, 44
-	call VisualRotWord
-	call nanosleep ; sleep 
-	call VisualSubWord ; testing SubWord on word3
+	movzx rdi, byte [dwordCounter]
+	call BinaryPrintIndexed
+	inc byte [dwordCounter]
+	call nanosleep
+	loop CreateAllWordsLoop
+	
 
+	
 _exit:
 	; exit(int status)
     mov     rax, 60         ; syscall number for sys_exit
