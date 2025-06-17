@@ -1,7 +1,14 @@
 section .bss
+	global roundKeys
+	
     originalKey resd 4 ; reserve 4 dwords (16 bytes)
 	dwords resd 45 ; 44 double word and the t (varient that needed every 4 dwords (t4, t8, t12, ... ,t40))
+	roundKeys resb 320 ; 10 round Keys ( one key - 128 bit of value --> 32 ascii letters )
+	
 section .data
+	
+	
+	
 	numbersStr:
     db "00","01","02","03","04","05","06","07","08","09","10","11","12","13","14","15"
     db "16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31"
@@ -16,9 +23,10 @@ section .data
 	colonSymbol db ':'
 	
 	originalKeyLength equ 16
+	keysString db 'Round Keys:' , 10, 13
+	keysStringLength equ $ - keysString
 	dwordCounter db 0
 	bindWordStr db 17 dup (0) ; 16 bits + newline character
-	roundKeys dq 10 dup (0) ; 10 round Keys
 	tCounter db 4 ; the first t is t4
 	Rcon:
     dd 0x01000000, 0x02000000, 0x04000000, 0x08000000,0x10000000
@@ -30,6 +38,8 @@ section .data
 	dq 0 ; sec
 	dq 250000000 ; nano sec
 	
+	goUpDownLine db 0x1b, '[1E' ; go the the beggining of the next line
+	goUpDownLineLength equ $ - goUpDownLine
 	goUpOneLine db 0x1b, '[1F' ; go the the beggining of the previous line
 	goUpOneLineLength equ $ - goUpOneLine
 	goRightXcolumns db 0x1b, '[11C'
@@ -42,7 +52,7 @@ section .text
     global _start
 	extern ConvertHexToEAX ; from formatConverter.asm
 	extern substitute_al_via_sbox ; from AES_sbox_substitute.asm
-
+	extern byte_to_hex
 	
 ; ----------------------------------------------------------------
 ; procedure that calls to function from formatConverter.asm
@@ -529,6 +539,71 @@ generateNewWordSPECIAL:
 	pop rbx
 	pop rax
 	ret
+	
+	
+;---------------------------------------------------
+; procedure that parses the round keys to hex
+;---------------------------------------------------
+parse_keys_to_hex:
+	push rcx
+	push rax
+	push rsi
+	push r8
+	
+	mov r8, 4
+	xor rax, rax
+	xor rcx, rcx
+	mov cl, 160 ; 10 round key need to parse (160 bytes)
+parseAllLoop:
+	mov al, [dwords + r8]
+	lea rsi, [roundKeys]
+	; input: AL  - byte to convert
+	;RSI - pointer to where to store the result (2 bytes)
+	call byte_to_hex
+	inc r8
+	loop parse_keys_to_hex
+	
+	pop r8 
+	pop rsi
+	pop rax
+	pop rcx
+	ret
+	
+	
+;---------------------------------------------------
+; procedure that prints the round keys in hex
+;---------------------------------------------------
+printKeysHex:
+	push rax
+    push rdi
+    push rsi
+    push rdx
+	push rcx 
+	push rbx
+	
+	lea rbx, [roundKeys]
+	xor rcx, rcx
+	mov cl, 320
+printKeyLoop:
+	;print current hex letter
+	push rcx ; to not override by the syscall
+	mov     rax, 1          ; syscall number for write
+    mov     rdi, 1          ; file descriptor 1 = stdout
+    mov     rsi, rbx ; rbx holds  roundKeys + the current index of the letter
+    mov     rdx, 1
+    syscall
+	pop rcx
+	;==================need to add a \n\r every 32 chars!===============================
+	inc rbx
+	loop printKeyLoop
+	
+	pop rbx
+	pop rcx 
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rax
+    ret
 	
 	
 _start:

@@ -1,6 +1,11 @@
 global ConvertHexToEAX
-section .text
+global byte_to_hex
 
+
+extern roundKeys ; from keyExpansion.asm bss section
+
+section .text
+	
 ; Convert 8 hex chars at [RAX] to a 32-bit value in EAX
 ; Assumptions:
 ; - [RAX] points to a null-terminated string of 8 uppercase hex characters (e.g., "1A3F5C7E")
@@ -53,3 +58,55 @@ Done:
     pop rcx               ; Restore RCX
     pop rbx               ; Restore RBX
     ret
+
+	
+	
+	
+; ---------------------------
+; Procedure: byte_to_hex
+; Converts byte in AL to two ASCII hex characters at [RSI] and [RSI+1]
+; Input:
+;   AL  - byte to convert
+;   RSI - pointer to where to store the result (2 bytes)
+; Output:
+;   [RSI]     = high nibble ASCII
+;   [RSI + 1] = low nibble ASCII
+; ---------------------------
+byte_to_hex:
+    push rax
+    push rcx
+    push rdx
+
+    mov dl, al ; Save original byte in DL
+
+    ; Convert high nibble
+    mov al, dl
+    shr al, 4
+    call nibble_to_ascii
+    mov [rsi], al
+
+    ; Convert low nibble
+    mov al, dl
+    and al, 0Fh
+    call nibble_to_ascii
+    mov [rsi + 1], al
+
+    pop rdx
+    pop rcx
+    pop rax
+    ret
+
+; ---------------------------
+; Procedure: nibble_to_ascii
+; Converts 0–15 in AL to ASCII '0'–'9', 'A'–'F'
+; Destroys only AL
+; ---------------------------
+nibble_to_ascii:
+    cmp al, 9
+    jbe .is_digit
+    add al, 'A' - 10
+    ret
+.is_digit:
+    add al, '0'
+    ret
+	
